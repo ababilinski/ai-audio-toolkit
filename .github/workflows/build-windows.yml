@@ -140,5 +140,5 @@ jobs:
         with:
           name: ai-audio-toolkit-windows
           path: build/windows_bundle/ai-audio-toolkit/**
-          compression-level: 0
+          compression-level: 6
           retention-days: 14
