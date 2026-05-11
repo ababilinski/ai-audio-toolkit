@@ -1,0 +1,8 @@
+PyQt6>=6.6.0
+audio-separator[cpu]>=0.25.0
+numpy>=1.24.0
+soundfile>=0.12.0
+matplotlib>=3.7.0
+pydub>=0.25.1
+torch>=2.0.0
+torchaudio>=2.0.0

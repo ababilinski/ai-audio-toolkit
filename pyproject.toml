@@ -1,0 +1,31 @@
+[project]
+name = "ai-audio-toolkit"
+version = "1.0.0"
+description = "AI audio toolkit for stem separation and speech repair"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "PyQt6>=6.6.0",
+    "audio-separator[gpu]>=0.25.0",
+    "numpy>=1.24.0",
+    "soundfile>=0.12.0",
+    "matplotlib>=3.7.0",
+    "pydub>=0.25.1",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "sounddevice>=0.4.6",
+    "librosa>=0.10.0",
+    "scipy>=1.10.0",
+    "appdirs>=1.4.4",
+]
+
+[project.optional-dependencies]
+cpu = [
+    "audio-separator[cpu]>=0.25.0",
+]
+
+[project.scripts]
+ai-audio-toolkit = "audio_editor.main:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
