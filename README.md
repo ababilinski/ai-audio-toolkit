@@ -88,6 +88,41 @@ SAM-Audio can use a large ImageBind checkpoint internally for visual ranking. Th
 - NVIDIA GPU recommended for the heavier models
 - CPU mode is possible for some workflows, but large models will be slow
 
+## Quick Start
+
+Clone the repository, create a virtual environment, install the base runtime, and launch the app:
+
+```bash
+git clone https://github.com/ababilinski/ai-audio-toolkit.git
+cd ai-audio-toolkit
+python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+python run.py
+```
+
+For NVIDIA/CUDA systems, install the matching PyTorch build before `requirements.txt`. Example:
+
+```bash
+pip install torch torchaudio torchvision --index-url https://download.pytorch.org/whl/cu126
+pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126
+python run.py
+```
+
+To enable every enhancement engine shown in the UI:
+
+```bash
+pip install deepfilternet
+pip install voicefixer speechbrain
+pip install git+https://github.com/facebookresearch/sam-audio.git
+pip install celluloid omegaconf pandas ptflops rich resampy tabulate gdown opencv-python python_speech_features scenedetect torchinfo yamlargparse
+pip install resemble-enhance --no-deps
+pip install clearvoice --no-deps
+```
+
+Model weights are not stored in the repository. They download on first use into the app-managed model/cache folders.
+
 ## Install From Source
 
 Using `uv`:
@@ -173,6 +208,8 @@ build\windows_bundle\ai-audio-toolkit\ai-audio-toolkit.exe
 ```
 
 The launcher starts a bundled CPython runtime instead of freezing the ML stack directly. That keeps PyTorch, ONNX Runtime, CUDA DLLs, and the model libraries closer to the environment they expect.
+
+The downloadable GitHub Actions artifact is the full `ai-audio-toolkit` folder, not only the `.exe`. It is large because it includes the Python runtime, FFmpeg, CUDA-capable PyTorch packages, `audio-separator`, SAM-Audio, and the optional enhancement engines. Model weights are not bundled; they download on first use.
 
 ## Practical Notes
 
