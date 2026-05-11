@@ -1,0 +1,121 @@
+name: Build Windows app
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows bundle
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Show free disk space
+        shell: pwsh
+        run: Get-PSDrive -PSProvider FileSystem
+
+      - name: Install FFmpeg
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Create virtual environment
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+
+      - name: Install base runtime
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -m pip install `
+            torch torchaudio torchvision `
+            --index-url https://download.pytorch.org/whl/cu126
+          .\.venv\Scripts\python.exe -m pip install `
+            -r requirements.txt `
+            --extra-index-url https://download.pytorch.org/whl/cu126
+          .\.venv\Scripts\python.exe -m pip install pyinstaller
+
+      - name: Install full engine set
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -m pip install deepfilternet
+          .\.venv\Scripts\python.exe -m pip install voicefixer speechbrain
+          .\.venv\Scripts\python.exe -m pip install sam-audio
+
+          # These two packages pin or downgrade shared ML dependencies when installed normally.
+          # The app carries compatibility patches/stubs for their inference paths, so install
+          # their runtime helpers explicitly and then install the packages without dependencies.
+          .\.venv\Scripts\python.exe -m pip install `
+            celluloid omegaconf pandas ptflops rich resampy tabulate `
+            gdown opencv-python python_speech_features scenedetect torchinfo yamlargparse
+          .\.venv\Scripts\python.exe -m pip install resemble-enhance --no-deps
+          .\.venv\Scripts\python.exe -m pip install clearvoice --no-deps
+
+      - name: Verify engine packages are present
+        shell: pwsh
+        run: |
+          @'
+          from importlib import metadata
+
+          required = [
+              "audio-separator",
+              "deepfilternet",
+              "resemble-enhance",
+              "clearvoice",
+              "voicefixer",
+              "speechbrain",
+              "sam-audio",
+          ]
+          missing = []
+          for package in required:
+              try:
+                  print(f"{package}: {metadata.version(package)}")
+              except metadata.PackageNotFoundError:
+                  missing.append(package)
+
+          if missing:
+              raise SystemExit(f"Missing required build packages: {', '.join(missing)}")
+          '@ | .\.venv\Scripts\python.exe -
+
+      - name: Compile Python sources
+        shell: pwsh
+        run: .\.venv\Scripts\python.exe -m compileall audio_editor scripts build_bundle.py run.py
+
+      - name: Build Windows bundle
+        shell: pwsh
+        run: .\.venv\Scripts\python.exe build_bundle.py
+
+      - name: Verify launcher exists
+        shell: pwsh
+        run: |
+          $exe = "build\windows_bundle\ai-audio-toolkit\ai-audio-toolkit.exe"
+          if (!(Test-Path $exe)) {
+            throw "Launcher was not created: $exe"
+          }
+          Get-Item $exe | Format-List FullName,Length,LastWriteTime
+
+      - name: Upload Windows bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: ai-audio-toolkit-windows
+          path: build/windows_bundle/ai-audio-toolkit/**
+          compression-level: 0
+          retention-days: 14
