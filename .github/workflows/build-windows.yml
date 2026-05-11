@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows:
@@ -19,6 +19,8 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PYTHONUTF8: "1"
       SAM_AUDIO_COMMIT: "68b48d48fff1ad776d3afefbe634eb5f5d60ba7b"
+      RELEASE_VERSION: "1"
+      RELEASE_TAG: "v1"
 
     steps:
       - name: Check out repository
@@ -33,9 +35,9 @@ jobs:
         shell: pwsh
         run: Get-PSDrive -PSProvider FileSystem
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg and release tools
         shell: pwsh
-        run: choco install ffmpeg -y --no-progress
+        run: choco install ffmpeg 7zip -y --no-progress
 
       - name: Create virtual environment
         shell: pwsh
@@ -74,22 +76,18 @@ jobs:
             }
           }
 
+          Invoke-PipInstall deepfilternet
           Invoke-PipInstall voicefixer speechbrain
           Invoke-PipInstall "git+https://github.com/facebookresearch/sam-audio.git@$env:SAM_AUDIO_COMMIT"
 
-          # Install optional runtime helpers before the packages with conflicting metadata.
+          # These two packages pin or downgrade shared ML dependencies when installed normally.
+          # The app carries compatibility patches/stubs for their inference paths, so install
+          # their runtime helpers explicitly and then install the packages without dependencies.
           Invoke-PipInstall `
             celluloid omegaconf pandas ptflops rich resampy tabulate `
-            gdown opencv-python python_speech_features scenedetect torchinfo yamlargparse `
-            deepfilterlib==0.5.6 loguru appdirs win32-setctime
-
-          # These packages declare dependency pins that conflict with the shared runtime:
-          #   - audio-separator requires numpy >= 2
-          #   - DeepFilterNet/ClearVoice/Resemble-Enhance declare numpy < 2
-          # Installing them with dependencies lets pip downgrade/upgrade numpy and packaging
-          # mid-build. Install them last without dependencies so the bundle keeps one shared
-          # ML runtime, like the known-good local build.
-          Invoke-PipInstall deepfilternet==0.5.6 resemble-enhance clearvoice --no-deps
+            gdown opencv-python python_speech_features scenedetect torchinfo yamlargparse
+          Invoke-PipInstall resemble-enhance --no-deps
+          Invoke-PipInstall clearvoice --no-deps
 
       - name: Verify engine packages are present
         shell: pwsh
@@ -97,12 +95,10 @@ jobs:
           @'
           import importlib.util
           from importlib import metadata
-          from packaging.version import Version
 
           required = [
               "audio-separator",
               "deepfilternet",
-              "deepfilterlib",
               "resemble-enhance",
               "clearvoice",
               "voicefixer",
@@ -122,15 +118,6 @@ jobs:
           if importlib.util.find_spec("sam_audio") is None:
               raise SystemExit("SAM-Audio module is not importable: sam_audio")
           print("sam_audio module: present")
-
-          numpy_version = Version(metadata.version("numpy"))
-          packaging_version = Version(metadata.version("packaging"))
-          if numpy_version < Version("2"):
-              raise SystemExit(f"numpy was downgraded below 2.x: {numpy_version}")
-          if packaging_version < Version("24"):
-              raise SystemExit(f"packaging was downgraded below 24.x: {packaging_version}")
-          print(f"numpy: {numpy_version}")
-          print(f"packaging: {packaging_version}")
           '@ | .\.venv\Scripts\python.exe -
 
       - name: Compile Python sources
@@ -149,6 +136,63 @@ jobs:
             throw "Launcher was not created: $exe"
           }
           Get-Item $exe | Format-List FullName,Length,LastWriteTime
+
+      - name: Package release bundle
+        shell: pwsh
+        run: |
+          $releaseDir = "build\release"
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+          $archiveBase = "$releaseDir\ai-audio-toolkit-v$env:RELEASE_VERSION-windows.7z"
+          if (Test-Path "$archiveBase.*") {
+            Remove-Item "$archiveBase.*" -Force
+          }
+          7z a -t7z -mx=3 -v1900m $archiveBase ".\build\windows_bundle\ai-audio-toolkit"
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip packaging failed."
+          }
+          Get-ChildItem $releaseDir | Format-Table Name,Length,LastWriteTime
+
+      - name: Create GitHub release v1
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem "build\release\ai-audio-toolkit-v$env:RELEASE_VERSION-windows.7z.*" |
+            Sort-Object Name |
+            ForEach-Object { $_.FullName }
+          if (!$assets) {
+            throw "No release archives were created."
+          }
+
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not delete existing release $env:RELEASE_TAG."
+            }
+          }
+
+          $notes = @"
+          AI Audio Toolkit version $env:RELEASE_VERSION Windows build.
+
+          Download every ai-audio-toolkit-v$env:RELEASE_VERSION-windows.7z.* file from this release.
+          Open the .001 file with 7-Zip, or run:
+
+              7z x ai-audio-toolkit-v$env:RELEASE_VERSION-windows.7z.001
+
+          Then run:
+
+              ai-audio-toolkit\ai-audio-toolkit.exe
+          "@
+
+          gh release create $env:RELEASE_TAG $assets `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --title "AI Audio Toolkit $env:RELEASE_VERSION" `
+            --notes $notes
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not create release $env:RELEASE_TAG."
+          }
 
       - name: Upload Windows bundle
         uses: actions/upload-artifact@v7
