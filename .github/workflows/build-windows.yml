@@ -18,6 +18,7 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PYTHONUTF8: "1"
+      SAM_AUDIO_COMMIT: "68b48d48fff1ad776d3afefbe634eb5f5d60ba7b"
 
     steps:
       - name: Check out repository
@@ -45,34 +46,52 @@ jobs:
       - name: Install base runtime
         shell: pwsh
         run: |
-          .\.venv\Scripts\python.exe -m pip install `
+          function Invoke-PipInstall {
+            param([Parameter(ValueFromRemainingArguments = $true)][string[]] $Packages)
+            & .\.venv\Scripts\python.exe -m pip install @Packages
+            if ($LASTEXITCODE -ne 0) {
+              throw "pip install failed: $($Packages -join ' ')"
+            }
+          }
+
+          Invoke-PipInstall `
             torch torchaudio torchvision `
             --index-url https://download.pytorch.org/whl/cu126
-          .\.venv\Scripts\python.exe -m pip install `
+
+          Invoke-PipInstall `
             -r requirements.txt `
             --extra-index-url https://download.pytorch.org/whl/cu126
-          .\.venv\Scripts\python.exe -m pip install pyinstaller
+          Invoke-PipInstall pyinstaller
 
       - name: Install full engine set
         shell: pwsh
         run: |
-          .\.venv\Scripts\python.exe -m pip install deepfilternet
-          .\.venv\Scripts\python.exe -m pip install voicefixer speechbrain
-          .\.venv\Scripts\python.exe -m pip install sam-audio
+          function Invoke-PipInstall {
+            param([Parameter(ValueFromRemainingArguments = $true)][string[]] $Packages)
+            & .\.venv\Scripts\python.exe -m pip install @Packages
+            if ($LASTEXITCODE -ne 0) {
+              throw "pip install failed: $($Packages -join ' ')"
+            }
+          }
+
+          Invoke-PipInstall deepfilternet
+          Invoke-PipInstall voicefixer speechbrain
+          Invoke-PipInstall "git+https://github.com/facebookresearch/sam-audio.git@$env:SAM_AUDIO_COMMIT"
 
           # These two packages pin or downgrade shared ML dependencies when installed normally.
           # The app carries compatibility patches/stubs for their inference paths, so install
           # their runtime helpers explicitly and then install the packages without dependencies.
-          .\.venv\Scripts\python.exe -m pip install `
+          Invoke-PipInstall `
             celluloid omegaconf pandas ptflops rich resampy tabulate `
             gdown opencv-python python_speech_features scenedetect torchinfo yamlargparse
-          .\.venv\Scripts\python.exe -m pip install resemble-enhance --no-deps
-          .\.venv\Scripts\python.exe -m pip install clearvoice --no-deps
+          Invoke-PipInstall resemble-enhance --no-deps
+          Invoke-PipInstall clearvoice --no-deps
 
       - name: Verify engine packages are present
         shell: pwsh
         run: |
           @'
+          import importlib.util
           from importlib import metadata
 
           required = [
@@ -82,7 +101,7 @@ jobs:
               "clearvoice",
               "voicefixer",
               "speechbrain",
-              "sam-audio",
+              "sam_audio",
           ]
           missing = []
           for package in required:
@@ -93,6 +112,10 @@ jobs:
 
           if missing:
               raise SystemExit(f"Missing required build packages: {', '.join(missing)}")
+
+          if importlib.util.find_spec("sam_audio") is None:
+              raise SystemExit("SAM-Audio module is not importable: sam_audio")
+          print("sam_audio module: present")
           '@ | .\.venv\Scripts\python.exe -
 
       - name: Compile Python sources
